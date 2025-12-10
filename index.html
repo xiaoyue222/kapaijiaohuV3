@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mystic Hand Tarot V7 - Studio Lighting</title>
+    <title>Mystic Hand Tarot - Final</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
 
@@ -164,8 +164,8 @@
         
         <!-- 开始界面 -->
         <div id="start-screen">
-            <h1>ARCANA V7</h1>
-            <p style="margin-bottom: 40px; opacity: 0.8;">Studio Lighting Test</p>
+            <h1>ARCANA</h1>
+            <p style="margin-bottom: 40px; opacity: 0.8;">The Final Ritual</p>
             <button id="start-btn" disabled>Loading Magic...</button>
             <div id="loading-text" class="loading">正在加载视觉模型...</div>
         </div>
@@ -245,15 +245,13 @@
 
             clock = new THREE.Clock();
 
-            // --- 光照系统升级 ---
+            // --- 光照系统 (保持 V7 设定，不做修改) ---
             
             // 1. 提升环境光 (基础亮度)
-            // 从 0.4 提升到 0.8，保证暗部也有细节
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
             // 2. 主光源 (模拟影棚灯)
-            // 位置在摄像机上方，照亮卡牌正面
             const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
             mainLight.position.set(0, 10, 20);
             scene.add(mainLight);
@@ -325,9 +323,8 @@
 
             const backTex = new THREE.CanvasTexture(backCanvas);
 
-            // 【关键修改】强制加载 20.jpg 为所有卡牌的正面
-            // 这样你只需要放这一张图就能看到效果
-            const imagePath = `20.jpg`; 
+            // 【关键修改】恢复加载 1.jpg - 20.jpg
+            const imagePath = `${index + 1}.jpg`; 
             
             const faceTex = textureLoader.load(
                 imagePath,
@@ -336,7 +333,7 @@
                 },
                 undefined,
                 function (err) {
-                    console.error(`无法加载图片: ${imagePath}. 请确保文件夹里有 20.jpg`);
+                    console.error(`无法加载图片: ${imagePath}. 请确保图片与html在同一文件夹且命名为 1.jpg 到 20.jpg`);
                 }
             );
             
@@ -376,9 +373,7 @@
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
-                    // 【关键修改】材质参数调整
-                    // roughness: 0.4 (稍微平滑一点，反光更清晰)
-                    // metalness: 0.1 (减少金属感，防止颜色变暗沉，让图案更鲜艳)
+                    // 材质参数保持 V7 的高亮设定
                     new THREE.MeshStandardMaterial({ map: tex.face, roughness: 0.4, metalness: 0.1 }), 
                     new THREE.MeshStandardMaterial({ map: tex.back, roughness: 0.4, metalness: 0.6 })
                 ];
