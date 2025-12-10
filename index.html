@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mystic Hand Tarot V5 - Brightness Fix</title>
+    <title>Mystic Hand Tarot V7 - Studio Lighting</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
 
@@ -164,8 +164,8 @@
         
         <!-- 开始界面 -->
         <div id="start-screen">
-            <h1>ARCANA V5</h1>
-            <p style="margin-bottom: 40px; opacity: 0.8;">Local Art + Light Boost</p>
+            <h1>ARCANA V7</h1>
+            <p style="margin-bottom: 40px; opacity: 0.8;">Studio Lighting Test</p>
             <button id="start-btn" disabled>Loading Magic...</button>
             <div id="loading-text" class="loading">正在加载视觉模型...</div>
         </div>
@@ -237,21 +237,35 @@
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            // 启用物理光照修正
+            renderer.useLegacyLights = false; 
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.shadowMap.enabled = true;
             container.appendChild(renderer.domElement);
 
             clock = new THREE.Clock();
 
-            // 光照
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            // --- 光照系统升级 ---
+            
+            // 1. 提升环境光 (基础亮度)
+            // 从 0.4 提升到 0.8，保证暗部也有细节
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
+            // 2. 主光源 (模拟影棚灯)
+            // 位置在摄像机上方，照亮卡牌正面
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            mainLight.position.set(0, 10, 20);
+            scene.add(mainLight);
+
+            // 3. 补光灯 (暖色侧光)
             const pointLight = new THREE.PointLight(0xd4af37, 1, 100);
-            pointLight.position.set(0, 10, 10);
+            pointLight.position.set(10, 10, 10);
             scene.add(pointLight);
             
-            const purpleLight = new THREE.PointLight(0x8a2be2, 2, 50);
-            purpleLight.position.set(-10, -5, 5);
+            // 4. 轮廓光 (紫光)
+            const purpleLight = new THREE.PointLight(0x8a2be2, 1.5, 50);
+            purpleLight.position.set(-15, -10, 5);
             scene.add(purpleLight);
 
             glowTexture = createGlowTexture();
@@ -284,6 +298,7 @@
         }
 
         function createCardTextures(index) {
+            // 背面纹理 (保持不变)
             const backCanvas = document.createElement('canvas');
             backCanvas.width = 256;
             backCanvas.height = 450;
@@ -310,7 +325,9 @@
 
             const backTex = new THREE.CanvasTexture(backCanvas);
 
-            const imagePath = `${index + 1}.jpg`;
+            // 【关键修改】强制加载 20.jpg 为所有卡牌的正面
+            // 这样你只需要放这一张图就能看到效果
+            const imagePath = `20.jpg`; 
             
             const faceTex = textureLoader.load(
                 imagePath,
@@ -319,7 +336,7 @@
                 },
                 undefined,
                 function (err) {
-                    console.error(`无法加载图片: ${imagePath}`);
+                    console.error(`无法加载图片: ${imagePath}. 请确保文件夹里有 20.jpg`);
                 }
             );
             
@@ -359,9 +376,11 @@
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
                     new THREE.MeshBasicMaterial({ color: 0x111111 }),
-                    // 关键：初始化 emissive 颜色为黑色
-                    new THREE.MeshStandardMaterial({ map: tex.face, roughness: 0.6, emissive: 0x000000 }), // Front (Index 4)
-                    new THREE.MeshStandardMaterial({ map: tex.back, roughness: 0.4, metalness: 0.6, emissive: 0x000000 })  // Back (Index 5)
+                    // 【关键修改】材质参数调整
+                    // roughness: 0.4 (稍微平滑一点，反光更清晰)
+                    // metalness: 0.1 (减少金属感，防止颜色变暗沉，让图案更鲜艳)
+                    new THREE.MeshStandardMaterial({ map: tex.face, roughness: 0.4, metalness: 0.1 }), 
+                    new THREE.MeshStandardMaterial({ map: tex.back, roughness: 0.4, metalness: 0.6 })
                 ];
 
                 const card = new THREE.Mesh(geometry, materials);
@@ -505,9 +524,6 @@
                 let scale = 1;
                 let glowOpacity = 0; 
                 
-                // 默认 Emissive 是黑色的 (不发光)
-                let targetEmissive = new THREE.Color(0x000000);
-
                 if (appState === 'IDLE') {
                     const t = time * card.userData.floatSpeed + card.userData.phaseOffset;
                     targetPos.set(
@@ -542,9 +558,6 @@
                         targetRot.set(0, 0, 0); 
                         scale = 1.6; 
                         glowOpacity = 0.6 + Math.sin(time * 3) * 0.2;
-                        
-                        // 关键：提升选中卡牌的亮度 (变灰白)
-                        targetEmissive.setHex(0x555555);
                     } else {
                         const theta = (i / CONFIG.cardCount) * Math.PI * 2;
                         targetPos.set(Math.cos(theta)*18, Math.sin(theta)*18, -15);
@@ -557,9 +570,6 @@
                         scale = 1.8;
                         targetRot.set(0, 0, 0); 
                         glowOpacity = 1.0; 
-                        
-                        // 关键：揭示时也保持亮度
-                        targetEmissive.setHex(0x555555);
                     } else {
                         const theta = (i / CONFIG.cardCount) * Math.PI * 2;
                         targetPos.set(Math.cos(theta)*20, Math.sin(theta)*20, -20);
@@ -569,7 +579,6 @@
 
                 card.position.lerp(targetPos, CONFIG.lerpSpeed);
                 
-                // 旋转插值
                 if (appState === 'IDLE') {
                      card.rotation.x = THREE.MathUtils.lerp(card.rotation.x, targetRot.x, 0.02);
                      card.rotation.y = THREE.MathUtils.lerp(card.rotation.y, targetRot.y, 0.02);
@@ -586,18 +595,9 @@
                 
                 card.scale.setScalar(THREE.MathUtils.lerp(card.scale.x, scale, 0.05));
                 
-                // 更新光晕
                 if (card.userData.glow) {
                     card.userData.glow.material.opacity = THREE.MathUtils.lerp(card.userData.glow.material.opacity, glowOpacity, 0.1);
                     card.userData.glow.rotation.copy(camera.rotation);
-                }
-
-                // 关键：更新材质的 Emissive 亮度 (对正面 material[4] 和背面 material[5] 同时操作)
-                if (card.material[4] && card.material[4].emissive) {
-                    card.material[4].emissive.lerp(targetEmissive, 0.1);
-                }
-                if (card.material[5] && card.material[5].emissive) {
-                    card.material[5].emissive.lerp(targetEmissive, 0.1);
                 }
             });
 
