@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mystic Hand Tarot V4 - Flat Structure</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050510;
+            font-family: 'Cinzel', serif;
+            color: #d4af37; /* 金色 */
+            user-select: none;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* UI Layer */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* 让鼠标穿透到Canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 初始开始按钮 */
+        #start-screen {
+            background: rgba(0, 0, 0, 0.85);
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 1s ease;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+        }
+
+        h1 {
+            font-size: 3rem;
+            letter-spacing: 0.5rem;
+            text-shadow: 0 0 20px rgba(212, 175, 55, 0.5);
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: transparent;
+            color: #d4af37;
+            border: 2px solid #d4af37;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            font-family: 'Cinzel', serif;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        button:hover {
+            background: #d4af37;
+            color: #000;
+            box-shadow: 0 0 30px #d4af37;
+        }
+
+        /* 右上角摄像头 */
+        #camera-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            border: 2px solid #d4af37;
+            border-radius: 10px;
+            overflow: hidden;
+            opacity: 0; /* 初始隐藏 */
+            transition: opacity 1s;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 镜像 */
+            display: block;
+        }
+        
+        #output_canvas {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        /* 状态指示器 */
+        #status-text {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            font-size: 1rem;
+            opacity: 0.7;
+            pointer-events: none;
+            text-shadow: 0 2px 4px black;
+        }
+
+        /* 返回按钮 */
+        #back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: auto;
+            padding: 10px 20px;
+            font-size: 1rem;
+        }
+
+        .loading {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+        
+        /* 隐藏的视频源 */
+        video {
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 3D 场景容器 -->
+    <div id="canvas-container"></div>
+
+    <!-- UI 层 -->
+    <div id="ui-layer">
+        
+        <!-- 开始界面 -->
+        <div id="start-screen">
+            <h1>ARCANA V4</h1>
+            <p style="margin-bottom: 40px; opacity: 0.8;">Loading Local Art...</p>
+            <button id="start-btn" disabled>Loading Magic...</button>
+            <div id="loading-text" class="loading">正在加载视觉模型...</div>
+        </div>
+
+        <!-- 状态提示 -->
+        <div id="status-text"></div>
+    </div>
+
+    <!-- 右上角摄像头画面 -->
+    <div id="camera-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <!-- 返回按钮 -->
+    <button id="back-btn" onclick="resetApp()">Return</button>
+
+    <!-- 背景音乐 -->
+    <audio id="bgm" loop>
+        <source src="https://cdn.pixabay.com/download/audio/2022/10/25/audio_24921ff893.mp3?filename=mystery-forest-12345.mp3" type="audio/mp3">
+    </audio>
+
+    <!-- 依赖库: Three.js & MediaPipe -->
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+        import { FilesetResolver, HandLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0';
+
+        // --- 全局变量与配置 ---
+        const CONFIG = {
+            cardCount: 20, // 20张牌
+            cardWidth: 3,
+            cardHeight: 5.2,
+            scatterRadius: 25, 
+            lerpSpeed: 0.05,
+            rotationLerpSpeed: 0.03,
+            cameraZ: 30        
+        };
+
+        let scene, camera, renderer, clock;
+        let cards = []; 
+        let starField;
+        
+        let appState = 'IDLE'; 
+        
+        let handLandmarker;
+        let webcamRunning = false;
+        let video, canvasElement, canvasCtx;
+        
+        let handPosition = new THREE.Vector3(0, 0, 0); 
+        let handXRatio = 0.5; 
+        let gestureType = 'NONE'; 
+        let lastIndexTipX = 0; 
+        let selectedCardIndex = -1; 
+        
+        let glowTexture;
+        
+        const textureLoader = new THREE.TextureLoader();
+
+        // 初始化 Three.js
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x050510, 0.015);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = CONFIG.cameraZ;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // 光照
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0xd4af37, 1, 100);
+            pointLight.position.set(0, 10, 10);
+            scene.add(pointLight);
+            
+            const purpleLight = new THREE.PointLight(0x8a2be2, 2, 50);
+            purpleLight.position.set(-10, -5, 5);
+            scene.add(purpleLight);
+
+            glowTexture = createGlowTexture();
+
+            createStars();
+            createCards();
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        // --- 视觉资产生成 ---
+        
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            
+            const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            gradient.addColorStop(0, 'rgba(255, 220, 100, 1)'); 
+            gradient.addColorStop(0.4, 'rgba(200, 100, 255, 0.5)'); 
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 128, 128);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        function createCardTextures(index) {
+            // 1. 生成背面纹理 (保持之前的神秘几何风格)
+            const backCanvas = document.createElement('canvas');
+            backCanvas.width = 256;
+            backCanvas.height = 450;
+            const ctx = backCanvas.getContext('2d');
+            
+            const grad = ctx.createLinearGradient(0,0, 256, 450);
+            grad.addColorStop(0, '#0a0a2a');
+            grad.addColorStop(1, '#000000');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 256, 450);
+
+            ctx.strokeStyle = '#d4af37';
+            ctx.lineWidth = 8;
+            ctx.strokeRect(10, 10, 236, 430);
+            
+            ctx.beginPath();
+            ctx.arc(128, 225, 50, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.font = '20px serif';
+            ctx.fillStyle = '#d4af37';
+            ctx.textAlign = 'center';
+            ctx.fillText('THE FATE', 128, 225);
+
+            const backTex = new THREE.CanvasTexture(backCanvas);
+
+            // 2. 加载同级目录下的图片
+            // 路径直接改为: "1.jpg", "2.jpg" 等，无需 assets/ 前缀
+            const imagePath = `${index + 1}.jpg`;
+            
+            const faceTex = textureLoader.load(
+                imagePath,
+                function (texture) {
+                    texture.colorSpace = THREE.SRGBColorSpace; 
+                },
+                undefined,
+                function (err) {
+                    console.error(`无法加载图片: ${imagePath}. 请确保图片 ${index+1}.jpg 和 index.html 在同一个文件夹内。`);
+                }
+            );
+            
+            return { back: backTex, face: faceTex };
+        }
+
+        function createStars() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            for (let i = 0; i < 2000; i++) {
+                vertices.push((Math.random() - 0.5) * 100);
+                vertices.push((Math.random() - 0.5) * 100);
+                vertices.push((Math.random() - 0.5) * 50 - 20); 
+            }
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true });
+            starField = new THREE.Points(geometry, material);
+            scene.add(starField);
+        }
+
+        function createCards() {
+            const geometry = new THREE.BoxGeometry(CONFIG.cardWidth, CONFIG.cardHeight, 0.05);
+            const glowGeo = new THREE.PlaneGeometry(CONFIG.cardWidth * 2.5, CONFIG.cardWidth * 2.5);
+            const glowMat = new THREE.MeshBasicMaterial({ 
+                map: glowTexture, 
+                transparent: true, 
+                opacity: 0,
+                depthWrite: false, 
+                blending: THREE.AdditiveBlending 
+            });
+
+            for (let i = 0; i < CONFIG.cardCount; i++) {
+                const tex = createCardTextures(i);
+                
+                const materials = [
+                    new THREE.MeshBasicMaterial({ color: 0x111111 }),
+                    new THREE.MeshBasicMaterial({ color: 0x111111 }),
+                    new THREE.MeshBasicMaterial({ color: 0x111111 }),
+                    new THREE.MeshBasicMaterial({ color: 0x111111 }),
+                    new THREE.MeshStandardMaterial({ map: tex.face, roughness: 0.6 }), // Front
+                    new THREE.MeshStandardMaterial({ map: tex.back, roughness: 0.4, metalness: 0.6 })  // Back
+                ];
+
+                const card = new THREE.Mesh(geometry, materials);
+                
+                const glowMesh = new THREE.Mesh(glowGeo, glowMat.clone());
+                glowMesh.position.z = -0.1; 
+                card.add(glowMesh);
+                
+                card.userData = {
+                    id: i,
+                    glow: glowMesh,
+                    velocity: new THREE.Vector3(),
+                    targetPos: new THREE.Vector3(),
+                    targetRot: new THREE.Euler(),
+                    phaseOffset: Math.random() * Math.PI * 2,
+                    floatSpeed: Math.random() * 0.5 + 0.2,
+                    rotSpeedX: (Math.random() - 0.5) * 0.5,
+                    rotSpeedY: (Math.random() - 0.5) * 0.5
+                };
+
+                card.position.set((Math.random()-0.5)*50, (Math.random()-0.5)*50, (Math.random()-0.5)*20);
+                
+                scene.add(card);
+                cards.push(card);
+            }
+        }
+
+        async function initMediaPipe() {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+            );
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 1
+            });
+            
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('start-btn').textContent = "Begin Ritual";
+            document.getElementById('loading-text').style.display = 'none';
+        }
+
+        // --- 逻辑控制 ---
+        function detectGesture(landmarks) {
+            if (!landmarks || landmarks.length === 0) return 'NONE';
+
+            const lm = landmarks[0];
+            const wrist = lm[0];
+            
+            const isFingerOpen = (tipIdx, pipIdx) => {
+                const dTip = Math.hypot(lm[tipIdx].x - wrist.x, lm[tipIdx].y - wrist.y);
+                const dPip = Math.hypot(lm[pipIdx].x - wrist.x, lm[pipIdx].y - wrist.y);
+                return dTip > dPip * 1.1;
+            };
+
+            const indexOpen = isFingerOpen(8, 6);
+            const middleOpen = isFingerOpen(12, 10);
+            const ringOpen = isFingerOpen(16, 14);
+            const pinkyOpen = isFingerOpen(20, 18);
+            
+            if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) return 'FIST';
+            if (indexOpen && !middleOpen && !ringOpen && !pinkyOpen) return 'POINT';
+            if (indexOpen && middleOpen && ringOpen) return 'OPEN';
+
+            return 'UNKNOWN';
+        }
+
+        function updateLogic(gesture, landmarks) {
+            if (!landmarks || landmarks.length === 0) {
+                if (appState !== 'IDLE') {
+                    appState = 'IDLE';
+                    document.getElementById('status-text').innerText = "State: Wandering Spirits (Idle)";
+                }
+                return;
+            }
+
+            const cx = landmarks[0][9].x; 
+            const cy = landmarks[0][9].y;
+            handXRatio = cx; 
+
+            const mappedX = (0.5 - cx) * 35; 
+            const mappedY = (0.5 - cy) * 20;
+            handPosition.lerp(new THREE.Vector3(mappedX, mappedY, 0), 0.1);
+
+            const statusEl = document.getElementById('status-text');
+
+            switch (gesture) {
+                case 'FIST':
+                    if (appState !== 'DECK') {
+                        appState = 'DECK';
+                        statusEl.innerText = "State: The Deck (Order)";
+                    }
+                    break;
+
+                case 'OPEN':
+                    if (appState !== 'CIRCLE') {
+                        appState = 'CIRCLE';
+                        statusEl.innerText = "State: Magic Circle (Power)";
+                    }
+                    break;
+
+                case 'POINT':
+                    if (appState === 'CIRCLE' || appState === 'IDLE') {
+                        appState = 'FOCUSED';
+                        statusEl.innerText = "State: Fate Selection";
+                    }
+                    
+                    if (appState === 'FOCUSED') {
+                        const normalizedX = 1 - Math.max(0, Math.min(1, handXRatio));
+                        selectedCardIndex = Math.floor(normalizedX * CONFIG.cardCount);
+                        if(selectedCardIndex >= CONFIG.cardCount) selectedCardIndex = CONFIG.cardCount - 1;
+                    }
+
+                    if (appState === 'FOCUSED') {
+                        const currentX = landmarks[0][8].x;
+                        const diff = Math.abs(currentX - lastIndexTipX);
+                        if (diff > 0.1) { 
+                            appState = 'REVEALED';
+                            statusEl.innerText = "State: Truth Revealed";
+                        }
+                        lastIndexTipX = currentX;
+                    }
+                    break;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            
+            if (starField) {
+                starField.rotation.y = time * 0.03;
+            }
+
+            cards.forEach((card, i) => {
+                let targetPos = new THREE.Vector3();
+                let targetRot = new THREE.Euler();
+                let scale = 1;
+                let glowOpacity = 0; 
+
+                if (appState === 'IDLE') {
+                    const t = time * card.userData.floatSpeed + card.userData.phaseOffset;
+                    targetPos.set(
+                        Math.sin(t * 0.5) * 25 + Math.cos(t * 0.3) * 10,
+                        Math.cos(t * 0.4) * 15 + Math.sin(t * 0.6) * 5,
+                        Math.sin(t * 0.7) * 10 - 5
+                    );
+                    targetRot.set(
+                        time * card.userData.rotSpeedX,
+                        time * card.userData.rotSpeedY,
+                        time * 0.1
+                    );
+
+                } else if (appState === 'DECK') {
+                    targetPos.set(0, -2, i * 0.05);
+                    targetRot.set(0, Math.PI, 0); 
+
+                } else if (appState === 'CIRCLE') {
+                    const radius = 14;
+                    const angleStep = (Math.PI * 2) / CONFIG.cardCount;
+                    const currentAngle = i * angleStep + time * 0.5;
+                    targetPos.set(
+                        Math.cos(currentAngle) * radius,
+                        Math.sin(currentAngle) * radius,
+                        0
+                    );
+                    targetRot.set(0, Math.PI, currentAngle + Math.PI / 2);
+
+                } else if (appState === 'FOCUSED') {
+                    if (i === selectedCardIndex) {
+                        targetPos.set(0, 1, 14); 
+                        targetRot.set(0, 0, 0); 
+                        scale = 1.6; 
+                        glowOpacity = 0.6 + Math.sin(time * 3) * 0.2;
+                    } else {
+                        const theta = (i / CONFIG.cardCount) * Math.PI * 2;
+                        targetPos.set(Math.cos(theta)*18, Math.sin(theta)*18, -15);
+                        targetRot.set(0, Math.PI, theta);
+                    }
+
+                } else if (appState === 'REVEALED') {
+                    if (i === selectedCardIndex) {
+                        targetPos.set(0, 1, 16);
+                        scale = 1.8;
+                        targetRot.set(0, 0, 0); 
+                        glowOpacity = 1.0; 
+                    } else {
+                        const theta = (i / CONFIG.cardCount) * Math.PI * 2;
+                        targetPos.set(Math.cos(theta)*20, Math.sin(theta)*20, -20);
+                        targetRot.set(0, Math.PI, theta);
+                    }
+                }
+
+                card.position.lerp(targetPos, CONFIG.lerpSpeed);
+                
+                if (appState === 'IDLE') {
+                     card.rotation.x = THREE.MathUtils.lerp(card.rotation.x, targetRot.x, 0.02);
+                     card.rotation.y = THREE.MathUtils.lerp(card.rotation.y, targetRot.y, 0.02);
+                     card.rotation.z = THREE.MathUtils.lerp(card.rotation.z, targetRot.z, 0.02);
+                } else if (appState === 'FOCUSED' && i === selectedCardIndex) {
+                    card.rotation.x += (targetRot.x - card.rotation.x) * CONFIG.rotationLerpSpeed;
+                    card.rotation.y += (targetRot.y - card.rotation.y) * CONFIG.rotationLerpSpeed;
+                    card.rotation.z += (targetRot.z - card.rotation.z) * CONFIG.rotationLerpSpeed;
+                } else {
+                    card.rotation.x += (targetRot.x - card.rotation.x) * CONFIG.lerpSpeed;
+                    card.rotation.y += (targetRot.y - card.rotation.y) * CONFIG.lerpSpeed;
+                    card.rotation.z += (targetRot.z - card.rotation.z) * CONFIG.lerpSpeed;
+                }
+                
+                card.scale.setScalar(THREE.MathUtils.lerp(card.scale.x, scale, 0.05));
+                
+                if (card.userData.glow) {
+                    card.userData.glow.material.opacity = THREE.MathUtils.lerp(card.userData.glow.material.opacity, glowOpacity, 0.1);
+                    card.userData.glow.rotation.copy(camera.rotation);
+                }
+            });
+
+            renderer.render(scene, camera);
+
+            if (webcamRunning && handLandmarker) {
+                let startTimeMs = performance.now();
+                if (video.currentTime !== lastVideoTime) {
+                    lastVideoTime = video.currentTime;
+                    const results = handLandmarker.detectForVideo(video, startTimeMs);
+                    
+                    canvasCtx.save();
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    canvasCtx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                    
+                    if (results.landmarks && results.landmarks.length > 0) {
+                        drawConnectors(canvasCtx, results.landmarks[0], HAND_CONNECTIONS, {color: "#00FF00", lineWidth: 2});
+                        drawLandmarks(canvasCtx, results.landmarks[0], {color: "#FF0000", lineWidth: 1});
+                        
+                        const gesture = detectGesture(results.landmarks);
+                        updateLogic(gesture, results.landmarks);
+                    } else {
+                        updateLogic(null, null);
+                    }
+                    canvasCtx.restore();
+                }
+            }
+        }
+
+        let lastVideoTime = -1;
+        
+        const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+        function drawConnectors(ctx, landmarks, connections, style) {
+            if (!landmarks) return;
+            ctx.strokeStyle = style.color;
+            ctx.lineWidth = style.lineWidth;
+            for (const conn of connections) {
+                const p1 = landmarks[conn[0]];
+                const p2 = landmarks[conn[1]];
+                if (p1 && p2) { 
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x * ctx.canvas.width, p1.y * ctx.canvas.height);
+                    ctx.lineTo(p2.x * ctx.canvas.width, p2.y * ctx.canvas.height);
+                    ctx.stroke();
+                }
+            }
+        }
+        function drawLandmarks(ctx, landmarks, style) {
+            if (!landmarks) return;
+            ctx.fillStyle = style.color;
+            for (const lm of landmarks) {
+                if (lm) {
+                    ctx.beginPath();
+                    ctx.arc(lm.x * ctx.canvas.width, lm.y * ctx.canvas.height, 2, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        const startBtn = document.getElementById('start-btn');
+        const backBtn = document.getElementById('back-btn');
+        const cameraContainer = document.getElementById('camera-container');
+        const startScreen = document.getElementById('start-screen');
+        const bgm = document.getElementById('bgm');
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                video = document.getElementById("webcam");
+                canvasElement = document.getElementById("output_canvas");
+                canvasCtx = canvasElement.getContext("2d");
+                
+                const constraints = { video: { width: 320, height: 240 } };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", () => {
+                    webcamRunning = true;
+                });
+
+                startScreen.style.opacity = 0;
+                setTimeout(() => { 
+                    startScreen.style.display = 'none'; 
+                    cameraContainer.style.opacity = 1;
+                    backBtn.style.opacity = 1;
+                }, 1000);
+                
+                bgm.volume = 0.5;
+                bgm.play();
+
+                appState = 'IDLE'; 
+
+            } catch (err) {
+                console.error(err);
+                alert("需要摄像头权限来捕捉你的魔法手势！");
+            }
+        });
+
+        window.resetApp = () => {
+            location.reload(); 
+        };
+
+        initThree();
+        initMediaPipe();
+
+    </script>
+</body>
+</html>
